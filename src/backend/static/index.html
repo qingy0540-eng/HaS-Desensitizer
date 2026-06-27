@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🔒 HaS 本地文档脱敏工具</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+.header {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  padding: 20px 30px;
+  border-bottom: 1px solid #334155;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header h1 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.header .badge {
+  background: #10b981;
+  color: #fff;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+.header .status { font-size: 13px; color: #94a3b8; }
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 1fr 260px 1fr;
+  gap: 20px;
+}
+.panel {
+  background: #1e293b;
+  border-radius: 12px;
+  border: 1px solid #334155;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 14px 18px;
+  background: #252f47;
+  border-bottom: 1px solid #334155;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-body { padding: 18px; }
+.textarea {
+  width: 100%;
+  min-height: 400px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 14px;
+  resize: vertical;
+  outline: none;
+}
+.textarea:focus { border-color: #3b82f6; }
+.textarea::placeholder { color: #64748b; }
+.control-panel .panel-body { padding: 14px; }
+.entity-group { margin-bottom: 12px; }
+.entity-group label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+.entity-group label:hover { background: #252f47; }
+.entity-group input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+.btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 10px;
+}
+.btn-primary {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+}
+.btn-primary:hover { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary {
+  background: #334155;
+  color: #e2e8f0;
+}
+.btn-secondary:hover { background: #475569; }
+.btn-success {
+  background: #10b981;
+  color: #fff;
+}
+.btn-success:hover { background: #059669; }
+.file-upload {
+  border: 2px dashed #475569;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  margin-bottom: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.file-upload:hover { border-color: #3b82f6; }
+.file-upload input { display: none; }
+.file-upload p { font-size: 13px; color: #94a3b8; }
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #334155;
+  border-radius: 2px;
+  margin: 10px 0;
+  overflow: hidden;
+  display: none;
+}
+.progress-bar.active { display: block; }
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #10b981);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.3s;
+}
+.status-msg {
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+  margin-top: 8px;
+  min-height: 18px;
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.toolbar .btn { flex: 1; margin-bottom: 0; font-size: 12px; padding: 8px; }
+.tag-highlight {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.entity-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.entity-legend span {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #252f47;
+  color: #94a3b8;
+}
+@media (max-width: 1024px) {
+  .container { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🔒 HaS 本地文档脱敏工具</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span class="badge">本地推理 · 数据不出设备</span>
+    <span class="status" id="modelStatus">正在检查模型...</span>
+  </div>
+</div>
+
+<div class="container">
+  <!-- 左侧输入 -->
+  <div class="panel">
+    <div class="panel-header">📄 输入文档</div>
+    <div class="panel-body">
+      <div class="file-upload" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <input type="file" id="fileInput" accept=".txt,.md,.csv,.json,.xml,.py,.js,.java,.c,.cpp,.go,.rs,.ts,.html,.css,.sql,.log,.docx" onchange="handleFile(event)">
+        <p>📂 点击或拖入文件</p>
+        <p style="font-size:11px;margin-top:4px">支持 .txt .md .csv .json .xml .py .js .java .c .go .rs .html .css .sql .log .docx</p>
+      </div>
+      <textarea class="textarea" id="inputText" placeholder="在此粘贴待脱敏的文本内容...&#10;&#10;示例：&#10;甲方：张三，身份证号：110101199001011234，联系电话：13800138000，邮箱：zhangsan@example.com，公司：北京神州数码科技有限公司，住址：北京市海淀区中关村大街100号。合同金额：500000元。"></textarea>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="pasteSample()">📋 示例</button>
+        <button class="btn btn-secondary" onclick="clearAll()">🗑️ 清空</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 中间控制 -->
+  <div class="panel control-panel">
+    <div class="panel-header">⚙️ 脱敏选项</div>
+    <div class="panel-body">
+      <div class="entity-group">
+        <label><input type="checkbox" id="checkAll" checked onchange="toggleAll(this)"><strong>☑ 全选</strong></label>
+      </div>
+      <div class="entity-group">
+        <label><input type="checkbox" class="entity-check" value="Person" checked> 姓名</label>
+        <label><input type="checkbox" class="entity-check" value="Phone" checked> 电话/手机号</label>
+        <label><input type="checkbox" class="entity-check" value="IDCard" checked> 身份证号</label>
+        <label><input type="checkbox" class="entity-check" value="Email" checked> 邮箱地址</label>
+        <label><input type="checkbox" class="entity-check" value="Address" checked> 地址</label>
+        <label><input type="checkbox" class="entity-check" value="Company" checked> 公司/组织名</label>
+        <label><input type="checkbox" class="entity-check" value="BankCard" checked> 银行卡号</label>
+        <label><input type="checkbox" class="entity-check" value="Amount" checked> 金额/价格</label>
+        <label><input type="checkbox" class="entity-check" value="IPAddress" checked> IP 地址</label>
+        <label><input type="checkbox" class="entity-check" value="Password" checked> 密码/密钥</label>
+      </div>
+
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="status-msg" id="statusMsg">就绪</div>
+
+      <button class="btn btn-primary" id="desensitizeBtn" onclick="startDesensitize()">🔒 开始脱敏</button>
+      <button class="btn btn-success" onclick="compareMode()">📊 对比模式</button>
+    </div>
+  </div>
+
+  <!-- 右侧输出 -->
+  <div class="panel">
+    <div class="panel-header">✅ 脱敏结果</div>
+    <div class="panel-body">
+      <textarea class="textarea" id="outputText" readonly placeholder="脱敏后的结果将显示在这里..."></textarea>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="copyOutput()">📋 复制</button>
+        <button class="btn btn-secondary" onclick="downloadOutput()">💾 导出</button>
+      </div>
+      <div class="entity-legend" id="entityLegend"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 检查模型状态
+fetch('/api/status')
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(data => {
+    const el = document.getElementById('modelStatus');
+    if (data.model_loaded) {
+      el.textContent = '✅ 模型已加载';
+      el.style.color = '#10b981';
+    } else if (data.model_exists) {
+      el.textContent = '🔄 模型加载中...';
+      el.style.color = '#f59e0b';
+    } else {
+      el.textContent = '❌ 模型未找到';
+      el.style.color = '#ef4444';
+    }
+  })
+  .catch(() => {
+    document.getElementById('modelStatus').textContent = '❌ 后端未连接';
+  });
+
+function getSelectedTypes() {
+  return Array.from(document.querySelectorAll('.entity-check:checked')).map(cb => cb.value);
+}
+
+function toggleAll(checkbox) {
+  document.querySelectorAll('.entity-check').forEach(cb => cb.checked = checkbox.checked);
+}
+
+function updateCheckAll() {
+  const all = document.querySelectorAll('.entity-check');
+  const checked = document.querySelectorAll('.entity-check:checked');
+  document.getElementById('checkAll').checked = all.length === checked.length;
+}
+document.querySelectorAll('.entity-check').forEach(cb => cb.addEventListener('change', updateCheckAll));
+
+function setProgress(pct, msg) {
+  const bar = document.getElementById('progressBar');
+  const fill = document.getElementById('progressFill');
+  const status = document.getElementById('statusMsg');
+  bar.classList.add('active');
+  fill.style.width = pct + '%';
+  status.textContent = msg || '';
+}
+
+function clearProgress() {
+  document.getElementById('progressBar').classList.remove('active');
+  document.getElementById('progressFill').style.width = '0%';
+}
+
+async function startDesensitize() {
+  const text = document.getElementById('inputText').value.trim();
+  if (!text) { alert('请输入待脱敏内容'); return; }
+
+  const types = getSelectedTypes();
+  if (types.length === 0) { alert('请至少选择一种实体类型'); return; }
+
+  const btn = document.getElementById('desensitizeBtn');
+  btn.disabled = true;
+  setProgress(30, '正在识别敏感实体...');
+
+  try {
+    const res = await fetch('/api/desensitize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, entity_types: types })
+    });
+    setProgress(70, '正在替换敏感信息...');
+
+    const data = await res.json();
+    setProgress(100, '完成');
+
+    if (data.error) {
+      alert('脱敏失败: ' + data.error);
+      return;
+    }
+
+    document.getElementById('outputText').value = data.desensitized;
+    updateLegend(data.entities);
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    setTimeout(clearProgress, 800);
+  }
+}
+
+function updateLegend(entities) {
+  const legend = document.getElementById('entityLegend');
+  legend.textContent = '';  // 安全清空
+  if (!entities || entities.length === 0) {
+    const span = document.createElement('span');
+    span.textContent = '未识别到敏感实体';
+    legend.appendChild(span);
+    return;
+  }
+  const typeNames = {
+    Person: '姓名', Phone: '电话', IDCard: '身份证', Email: '邮箱',
+    Address: '地址', Company: '公司', BankCard: '银行卡', Amount: '金额',
+    IPAddress: 'IP', Password: '密码'
+  };
+  const counts = {};
+  entities.forEach(e => { counts[e.type] = (counts[e.type] || 0) + 1; });
+  // 使用 DOM API 避免 XSS
+  Object.entries(counts).forEach(([t, c]) => {
+    const span = document.createElement('span');
+    span.textContent = (typeNames[t] || t) + ': ' + c;
+    legend.appendChild(span);
+  });
+}
+
+function handleFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('inputText').value = e.target.result;
+    document.getElementById('statusMsg').textContent = '已加载: ' + file.name;
+  };
+  reader.readAsText(file);
+}
+
+// 拖放文件支持
+document.addEventListener('DOMContentLoaded', () => {
+  const dropZone = document.getElementById('dropZone');
+  if (!dropZone) return;
+
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, false);
+  });
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropZone.addEventListener(eventName, () => {
+      dropZone.style.borderColor = '#3b82f6';
+      dropZone.style.background = '#1e3a5f';
+    }, false);
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropZone.addEventListener(eventName, () => {
+      dropZone.style.borderColor = '';
+      dropZone.style.background = '';
+    }, false);
+  });
+
+  dropZone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      document.getElementById('inputText').value = ev.target.result;
+      document.getElementById('statusMsg').textContent = '已加载: ' + file.name;
+    };
+    reader.readAsText(file);
+  }, false);
+});
+
+function pasteSample() {
+  document.getElementById('inputText').value =
+    '甲方：张三，身份证号：110101199001011234，联系电话：13800138000，\n' +
+    '电子邮箱：zhangsan@example.com，任职于北京神州数码科技有限公司，\n' +
+    '住址：北京市海淀区中关村大街100号。本次合同金额为人民币伍拾万元整（¥500,000.00）。\n' +
+    '乙方：李四，电话：13912345678，公司地址：上海市浦东新区陆家嘴环路1000号。';
+}
+
+function clearAll() {
+  document.getElementById('inputText').value = '';
+  document.getElementById('outputText').value = '';
+  document.getElementById('entityLegend').innerHTML = '';
+  document.getElementById('statusMsg').textContent = '已清空';
+}
+
+function copyOutput() {
+  const text = document.getElementById('outputText').value;
+  if (!text) { alert('没有可复制的内容'); return; }
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('statusMsg').textContent = '✅ 已复制';
+  }).catch(() => {
+    document.getElementById('statusMsg').textContent = '❌ 复制失败，请手动复制';
+  });
+}
+
+function downloadOutput() {
+  const text = document.getElementById('outputText').value;
+  if (!text) { alert('没有可导出的内容'); return; }
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'desensitized_output.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('statusMsg').textContent = '✅ 已导出';
+}
+
+function compareMode() {
+  const input = document.getElementById('inputText').value;
+  const output = document.getElementById('outputText').value;
+  if (!input || !output) { alert('需要同时有输入和输出内容'); return; }
+
+  const w = window.open('', '_blank', 'width=1200,height=700');
+  const d = w.document;
+
+  // 使用 DOM API 创建内容，避免 XSS
+  d.open();
+  d.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>对比模式</title></head><body></body></html>');
+  d.close();
+
+  const style = d.createElement('style');
+  style.textContent = 'body{font-family:sans-serif;background:#0f172a;color:#e2e8f0;margin:0;display:flex;height:100vh}' +
+    '.col{flex:1;padding:20px;overflow:auto}' +
+    '.col h2{margin:0 0 10px;font-size:16px}' +
+    'pre{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;min-height:500px}' +
+    '.left{border-right:1px solid #334155}';
+  d.head.appendChild(style);
+
+  const leftCol = d.createElement('div');
+  leftCol.className = 'col left';
+  const leftH2 = d.createElement('h2');
+  leftH2.textContent = '📄 原文';
+  const leftPre = d.createElement('pre');
+  leftPre.textContent = input;
+  leftCol.appendChild(leftH2);
+  leftCol.appendChild(leftPre);
+
+  const rightCol = d.createElement('div');
+  rightCol.className = 'col';
+  const rightH2 = d.createElement('h2');
+  rightH2.textContent = '✅ 脱敏结果';
+  const rightPre = d.createElement('pre');
+  rightPre.textContent = output;
+  rightCol.appendChild(rightH2);
+  rightCol.appendChild(rightPre);
+
+  d.body.appendChild(leftCol);
+  d.body.appendChild(rightCol);
+}
+</script>
+</body>
+</html>
