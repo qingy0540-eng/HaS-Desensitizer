@@ -1,5 +1,3 @@
-import pytest
-
 from src.core import desensitizer as d
 
 
@@ -11,15 +9,13 @@ def test_sanitize_user_text_basic():
     assert "Hello" in out
 
 
-def test_parse_entries_empty_and_list():
-    # empty list JSON
-    out = d._parse_entries("[]")
+def test_parse_entities_empty_and_dict():
+    out = d._parse_entities("")
     assert isinstance(out, list)
     assert out == []
 
-    # JSON array with entries
-    raw = '[{"type": "Phone", "value": "13800001111"}]'
-    out2 = d._parse_entries(raw)
+    raw = '{"Phone": ["13800001111"]}'
+    out2 = d._parse_entities(raw)
     assert isinstance(out2, list)
     assert len(out2) == 1
     assert out2[0].get("type") == "Phone"
@@ -31,7 +27,7 @@ def test_deduplicate_entries():
         {"type": "Phone", "value": "13800001111"},
         {"type": "Phone", "value": "13800001111"},
     ]
-    res = d._deduplicate_entries(entries)
+    res = d._deduplicate_entities(entries)
     assert isinstance(res, list)
     # duplicates should be removed
     assert len(res) == 1
@@ -40,8 +36,8 @@ def test_deduplicate_entries():
 def test_replace_with_tags_simple():
     text = "联系我: 13800001111 或 alice@example.com"
     entries = [
-        {"type": "Phone", "value": "13800001111", "tag": "[PHONE]"},
-        {"type": "Email", "value": "alice@example.com", "tag": "[EMAIL]"},
+        {"type": "Phone", "value": "13800001111"},
+        {"type": "Email", "value": "alice@example.com"},
     ]
     out = d.replace_with_tags(text, entries)
     assert isinstance(out, str)
@@ -49,5 +45,5 @@ def test_replace_with_tags_simple():
     assert "13800001111" not in out
     assert "alice@example.com" not in out
     # tags should be present
-    assert "[PHONE]" in out
-    assert "[EMAIL]" in out
+    assert "<Phone[1].Mobile>" in out
+    assert "<Email[1].Address>" in out

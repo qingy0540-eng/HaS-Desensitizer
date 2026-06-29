@@ -9,21 +9,24 @@
 """
 import json
 import os
-import sys
 import threading
 import time
-import traceback
 import logging
 from pathlib import Path
 from typing import Optional, List, Dict
 
-from fastapi import FastAPI, File, UploadFile, Request, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import status
 
 # 导入核心脱敏实现
-from src.core.desensitizer import HaSDesensitizer
+from src.core.desensitizer import (
+    ENTITY_ATTR_MAP,
+    HaSDesensitizer,
+    _deduplicate_entities,
+    replace_with_tags,
+)
 
 # --- 配置 logging ---
 logging.basicConfig(
@@ -76,9 +79,44 @@ def is_rate_limited(client_ip: str) -> bool:
 
 # --- 文件上传大小限制（字节） ---
 MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", str(10 * 1024 * 1024)))  # 默认 10MB
+ALLOWED_MIME_TYPES = {
+    "text/plain", "text/markdown", "text/csv", "application/json",
+    "application/xml", "text/xml", "text/html", "text/css",
+    "application/javascript", "text/javascript",
+}
+ALLOWED_EXTENSIONS = {
+    ".txt", ".md", ".csv", ".json", ".xml", ".py", ".js", ".java",
+    ".c", ".cpp", ".go", ".rs", ".ts", ".html", ".css", ".sql", ".log",
+}
 
 # 全局脱敏器实例（在启动时初始化）
 DES: Optional[HaSDesensitizer] = None
+
+
+def _json_safe(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def _desensitize_payload(text: str, entity_types: Optional[list[str]] = None) -> dict:
+    if DES is None:
+        logger.error("Desensitizer not loaded")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="service not ready")
+
+    entities = DES.scan_entities(text, entity_types=entity_types)
+    entities = _deduplicate_entities(entities)
+    desensitized = replace_with_tags(text, entities, ENTITY_ATTR_MAP)
+    return _json_safe({
+        "original": text,
+        "desensitized": desensitized,
+        "entities": entities,
+        "entity_count": len(entities),
+    })
 
 
 @app.on_event("startup")
@@ -128,21 +166,18 @@ async def api_desensitize(request: Request):
 
     try:
         # 调用核心脱敏逻辑
-        des_result = DES.desensitize(text, entity_types=entity_types)
-        # 处理返回类型
-        if isinstance(des_result, (str, bytes)):
-            return JSONResponse({"desensitized": des_result})
-        elif isinstance(des_result, dict):
-            return JSONResponse(des_result)
-        else:
-            return JSONResponse({"desensitized": str(des_result)})
+        return JSONResponse(_desensitize_payload(text, entity_types=entity_types))
     except Exception:
         logger.exception("Desensitization failed")
         raise HTTPException(status_code=500, detail="internal error")
 
 
 @app.post("/api/desensitize-file")
-async def api_desensitize_file(request: Request, file: UploadFile = File(...)):
+async def api_desensitize_file(
+    request: Request,
+    file: UploadFile = File(...),
+    entity_types: Optional[str] = Form(None),
+):
     client_ip = request.client.host if request.client else "unknown"
     if is_rate_limited(client_ip):
         logger.warning("Rate limited file upload from %s", client_ip)
@@ -168,6 +203,15 @@ async def api_desensitize_file(request: Request, file: UploadFile = File(...)):
         logger.info("Rejected upload: size %d exceeds limit %d", size, MAX_FILE_SIZE)
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file too large")
 
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported file type: {ext}")
+
+    content_type = file.content_type or ""
+    if content_type and content_type not in ALLOWED_MIME_TYPES and content_type != "application/octet-stream":
+        raise HTTPException(status_code=400, detail=f"unsupported content type: {content_type}")
+
     try:
         content_bytes = await file.read()
         try:
@@ -176,13 +220,11 @@ async def api_desensitize_file(request: Request, file: UploadFile = File(...)):
             logger.warning("Uploaded file is not valid UTF-8")
             raise HTTPException(status_code=400, detail="Uploaded file must be UTF-8 text")
 
-        des_result = DES.desensitize(text)
-        if isinstance(des_result, (str, bytes)):
-            return JSONResponse({"desensitized": des_result})
-        elif isinstance(des_result, dict):
-            return JSONResponse(des_result)
-        else:
-            return JSONResponse({"desensitized": str(des_result)})
+        try:
+            types = json.loads(entity_types) if entity_types else None
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid entity_types")
+        return JSONResponse(_desensitize_payload(text, entity_types=types))
     except HTTPException:
         raise
     except Exception:
