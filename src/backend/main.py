@@ -5,6 +5,7 @@
 - 使用 FastAPI 的 CORSMiddleware 替代手工 Origin 检查
 - 在文件上传时尽早检查大小并返回 413
 - 将开发中基于内存的速率限制标注为仅开发用
+- 接入 core.desensitizer.HaSDesensitizer 实际脱敏逻辑（在启动时初始化）
 """
 import json
 import os
@@ -21,10 +22,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import status
 
-# 依赖的模块，保留原有导入（部分在项目内）
-from typing import Optional
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+# 导入核心脱敏实现
+from src.core.desensitizer import HaSDesensitizer
 
 # --- 配置 logging ---
 logging.basicConfig(
@@ -78,6 +77,22 @@ def is_rate_limited(client_ip: str) -> bool:
 # --- 文件上传大小限制（字节） ---
 MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", str(10 * 1024 * 1024)))  # 默认 10MB
 
+# 全局脱敏器实例（在启动时初始化）
+DES: Optional[HaSDesensitizer] = None
+
+
+@app.on_event("startup")
+async def startup_event():
+    global DES
+    model_path = os.environ.get("MODEL_PATH")
+    try:
+        logger.info("Initializing HaSDesensitizer (model_path=%s)...", model_path)
+        DES = HaSDesensitizer(model_path=model_path)
+        logger.info("HaSDesensitizer initialized")
+    except Exception:
+        logger.exception("Failed to initialize HaSDesensitizer on startup")
+        # 不阻塞启动，但后续调用会返回 503
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -95,6 +110,10 @@ async def api_desensitize(request: Request):
         logger.warning("Rate limited request from %s", client_ip)
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
 
+    if DES is None:
+        logger.error("Desensitizer not loaded")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="service not ready")
+
     try:
         payload = await request.json()
     except Exception:
@@ -105,11 +124,18 @@ async def api_desensitize(request: Request):
     if not text:
         return JSONResponse({"error": "empty text"}, status_code=400)
 
-    # TODO: 调用核心脱敏逻辑（保留原有调用点）
+    entity_types = payload.get("entity_types")
+
     try:
-        # placeholder: 实际应调用 core.desensitizer 相关方法
-        result = {"desensitized": text}
-        return JSONResponse(result)
+        # 调用核心脱敏逻辑
+        des_result = DES.desensitize(text, entity_types=entity_types)
+        # 处理返回类型
+        if isinstance(des_result, (str, bytes)):
+            return JSONResponse({"desensitized": des_result})
+        elif isinstance(des_result, dict):
+            return JSONResponse(des_result)
+        else:
+            return JSONResponse({"desensitized": str(des_result)})
     except Exception:
         logger.exception("Desensitization failed")
         raise HTTPException(status_code=500, detail="internal error")
@@ -122,6 +148,10 @@ async def api_desensitize_file(request: Request, file: UploadFile = File(...)):
         logger.warning("Rate limited file upload from %s", client_ip)
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
 
+    if DES is None:
+        logger.error("Desensitizer not loaded")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="service not ready")
+
     # 早期检查文件大小：使用 underlying file-like 对象的 tell/seek
     try:
         uploaded_file = file.file
@@ -130,7 +160,7 @@ async def api_desensitize_file(request: Request, file: UploadFile = File(...)):
         size = uploaded_file.tell()
         uploaded_file.seek(current, os.SEEK_SET)
     except Exception:
-        # 如果无法获取大小，作为保护，拒绝过大的上载（或继续但要小心）
+        # 如果无法获取大小，作为保护，拒绝上载
         logger.exception("Could not determine uploaded file size")
         raise HTTPException(status_code=400, detail="Could not determine file size")
 
@@ -138,21 +168,21 @@ async def api_desensitize_file(request: Request, file: UploadFile = File(...)):
         logger.info("Rejected upload: size %d exceeds limit %d", size, MAX_FILE_SIZE)
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file too large")
 
-    # 读取并处理文件（示例，保留原有逻辑点）
     try:
-        # 仅在内存安全范围内读取
         content_bytes = await file.read()
-        # 假定为文本文件，尝试解码
         try:
             text = content_bytes.decode("utf-8")
         except UnicodeDecodeError:
-            # 可选：尝试其他编码或直接返回错误
             logger.warning("Uploaded file is not valid UTF-8")
             raise HTTPException(status_code=400, detail="Uploaded file must be UTF-8 text")
 
-        # TODO: 调用核心脱敏逻辑处理 text
-        result = {"desensitized": text}
-        return JSONResponse(result)
+        des_result = DES.desensitize(text)
+        if isinstance(des_result, (str, bytes)):
+            return JSONResponse({"desensitized": des_result})
+        elif isinstance(des_result, dict):
+            return JSONResponse(des_result)
+        else:
+            return JSONResponse({"desensitized": str(des_result)})
     except HTTPException:
         raise
     except Exception:
@@ -164,8 +194,15 @@ async def api_desensitize_file(request: Request, file: UploadFile = File(...)):
 async def api_status():
     # 返回一些运行时状态（不要泄露敏感信息）
     try:
+        model_loaded = False
+        if DES is not None:
+            try:
+                # 如果有属性或方法可用于检测模型加载状态，可替换下面逻辑
+                model_loaded = True
+            except Exception:
+                model_loaded = False
         return JSONResponse({
-            "model_loaded": False,
+            "model_loaded": model_loaded,
             "mode": os.environ.get("APP_MODE", "dev"),
         })
     except Exception:
@@ -180,7 +217,6 @@ def main():
     port = int(os.environ.get("PORT", "8765"))
     logger.info("Host: %s, Port: %s", host, port)
 
-    # 原先代码可能直接用 uvicorn.run 或 Server + Config
     try:
         import uvicorn
 
